@@ -11,12 +11,20 @@ import pdb
 import priorityqueue
 
 MAXPRIORITY = 999999
+WEIGHT = None
 
 """
 ======================================================================
   Complete the following function.
 ======================================================================
 """
+
+def weight(G):
+    total_weight = 0.0
+    for node in [node for node in G.nodes()]:
+        total_weight += G[node][node]['weight']
+
+    return total_weight
 
 def conquer_cost(G, target_node):
     return G[target_node][target_node]['weight']
@@ -32,13 +40,37 @@ def acquire_cost(G, current_node, target_node, shortest_paths):
 
     return np.float64(acquire_cost).item()
 
-def value(G, current_node, target_node, unconquered_kingdoms, conquered_kingdoms):
-    adjacent = G.neighbors(target_node)
-    num_neighbors = len([a for a in adjacent])
+def value(G, current_node, target_node, unconquered_kingdoms, conquered_kingdoms, start_node):
+
+    adjacent = [neighbor for neighbor in G.neighbors(target_node) if (neighbor != target_node and neighbor in unconquered_kingdoms)]
+    outreach = (len([a for a in adjacent]) + 1) / len(unconquered_kingdoms)
+    outreach = outreach ** 10   # What percent of remaining nodes it will conquer
+
+    coming_from_leaf = False
+    leaf_bonus = 0.0
+
+    current_node_adjacent = [neighbor for neighbor in G.neighbors(current_node) if neighbor != current_node]
+    unconquered_adjacent = list(set(current_node_adjacent).intersection(unconquered_kingdoms))
+    #pdb.set_trace()
+
+    # The node you are coming from only has one remaining unconquered adjacent node: the target
+    if len(unconquered_adjacent) == 1 and unconquered_adjacent[0] == target_node:
+        coming_from_leaf = True
+
+    if coming_from_leaf and start_node != current_node:
+        # You get a bonus for stopping the inevitable return to capture the leaf
+        # In addition, avoid adding the leaf bonus if the leaf node is the start node, since you will have to 
+        # return to the start node anyway
+        leaf_bonus = G[current_node][current_node]['weight']    # The weight of the leaf
+        #leaf_bonus = 0.0
+    
+    # Includes conquer cost for current node, since it is adjacent to itself
     surrender_value = sum([conquer_cost(G, neighbor) for neighbor in adjacent])
 
-    factors = np.array([num_neighbors, surrender_value])
-    weights = np.array([1.0, 1.0])
+    factors = np.array([outreach, surrender_value, leaf_bonus])
+    #print("Factors for node", target_node, ":", outreach, ",", surrender_value)
+    weights = np.array([10 * weight(G), 1.0, weight(G) * 10])
+    # For weights: Everything not implicitly scaled by the weight of the graph should be explicitly multiplied by it
 
     return np.float64(np.dot(factors, weights)).item()
 
@@ -54,8 +86,10 @@ def solve(list_of_kingdom_names, starting_kingdom, adjacency_matrix, params=[]):
     Output:
         Return 2 things. The first is a list of kingdoms representing the walk, and the second is the set of kingdoms that are conquered
     """
-    #raise Exception('"solve" function not defined')
-    print("ADJ:", adjacency_matrix)
+    
+    print("INPUT")
+    print("-----")
+    print("Adjacency matrix: ", adjacency_matrix)
     print("Kingdom names: ", list_of_kingdom_names)
     N = len(adjacency_matrix)   # number of vertices
     closed_walk = []
@@ -77,14 +111,10 @@ def solve(list_of_kingdom_names, starting_kingdom, adjacency_matrix, params=[]):
     G.add_weighted_edges_from(edges)
 
     shortest_paths = nx.floyd_warshall(G)
-    
-    print(acquire_cost(G, 0, 1, shortest_paths))
 
     vertex_sets = [None] * len(G.nodes())
     costs = []
     start_vertex = list_of_kingdom_names.index(starting_kingdom)
-
-    #pdb.set_trace()
 
     #pdb.set_trace()
 
@@ -94,11 +124,13 @@ def solve(list_of_kingdom_names, starting_kingdom, adjacency_matrix, params=[]):
         for adjacent_vertex in G[vertex]:
             vertex_sets[i].append(adjacent_vertex)
 
-    print(vertex_sets)
-    print(costs)
+    print("Initial costs: ", costs)
+    print()
 
     selected, cost = weightedsetcover(G, vertex_sets, costs, start_vertex, shortest_paths)
 
+    print("RESULT")
+    print("------")
     print(selected, " - cost: ", cost)
 
     return selected, conquered_kingdoms
@@ -134,34 +166,51 @@ def weightedsetcover(G, S, costs, start_node, shortest_paths):
     unconquered_kingdoms = set([i for i in range(K)])
     current_node = start_node
 
+    print("PQ INITIALIZATION")
+    print("-----------------")
+
     pq = priorityqueue.PriorityQueue()
     cost = 0
     coverednum = 0
-    for index, item in enumerate(adj): # add all sets to the priorityqueue
-        if len(item) == 0:
+    for index, node in enumerate(adj): # add all sets to the priorityqueue
+        if len(node) == 0:
             pq.addtask(index, MAXPRIORITY)
+            print("Added node", index, "with priority", MAXPRIORITY)
         else:
-            pq.addtask(index, float(costs[index]) / len(item))
+            priority = float(costs[index]) / value(G, start_node, index, unconquered_kingdoms, conquered_kingdoms, start_node)
+            pq.addtask(index, priority)
+            print("Added node", index, "with priority", priority, "(cost:", float(costs[index]), ", value:", value(G, start_node, index, unconquered_kingdoms, conquered_kingdoms, start_node), ")")
+
+    print()
 
     while len(conquered_kingdoms) < K:
         target_node = pq.poptask() # get the most cost-effective set
+        print("Conquering node: ", target_node)
         selected.append(target_node) # a: set id
         cost += costs[target_node]
         coverednum += len(adj[target_node])
         conquered_kingdoms.add(target_node)
+        if target_node in unconquered_kingdoms:
+            unconquered_kingdoms.remove(target_node)
 
-        for adjacent_vertex in adj[target_node]:
+        # pdb.set_trace()
+
+        for adjacent_vertex in [node for node in adj[target_node] if node != target_node]:
             conquered_kingdoms.add(adjacent_vertex)
-            unconquered_kingdoms.remove(adjacent_vertex)
+            if adjacent_vertex in unconquered_kingdoms:
+                unconquered_kingdoms.remove(adjacent_vertex)
+            #pq.addtask(adjacent_vertex, MAXPRIORITY)
+            print("Adding task", adjacent_vertex, "with priority", MAXPRIORITY)
             for n in udict[adjacent_vertex]:
                 if n != target_node:
                     adj[n].discard(adjacent_vertex)
-                    if len(adj[n]) == 0:
-                        pq.addtask(n, MAXPRIORITY)
-                    else:
-                        costs[n] = acquire_cost(G, target_node, n, shortest_paths)
-                        #pdb.set_trace()
-                        pq.addtask(n, costs[n] / value(G, target_node, n, unconquered_kingdoms, conquered_kingdoms))
+                    # if len(adj[n]) == 0:
+                    #     pq.addtask(n, MAXPRIORITY)
+
+                    # else:
+                    #     costs[n] = acquire_cost(G, target_node, n, shortest_paths)
+                    #     #pdb.set_trace()
+                    #     pq.addtask(n, costs[n] / value(G, target_node, n, unconquered_kingdoms, conquered_kingdoms))
 
         # Update the sets that contains the new covered elements
         # Commented out: only updates nodes that touched adjacent nodes that were removed
@@ -176,8 +225,8 @@ def weightedsetcover(G, S, costs, start_node, shortest_paths):
 
         # Update the acquire cost of each unacquired vertex
         for vertex in unconquered_kingdoms:
-            costs[vertex] = acquire_cost(G, target_node, vertex, shortest_paths)
-            pq.addtask(vertex, costs[vertex] / value(G, target_node, vertex, unconquered_kingdoms, conquered_kingdoms))
+            cost = acquire_cost(G, target_node, vertex, shortest_paths)
+            pq.addtask(vertex, cost / value(G, target_node, vertex, unconquered_kingdoms, conquered_kingdoms, start_node))
 
 
         adj[target_node].clear()
