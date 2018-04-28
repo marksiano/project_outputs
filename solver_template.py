@@ -19,6 +19,45 @@ WEIGHT = None
 ======================================================================
 """
 
+def floyd_warshall(G):
+
+    V = len(G.nodes())
+    dist = [[float("inf") for x in range(V)] for y in range(V)]
+    pred = [[None for x in range(V)] for y in range(V)]
+
+    for u, v in [edge for edge in G.edges()]:
+        if u == v:
+            dist[u][v] = 0
+            pred[u][v] = v
+        else:
+            dist[u][v] = G[u][v]['weight']
+            dist[v][u] = G[v][u]['weight']
+            pred[u][v] = v
+            pred[v][u] = u
+
+    for k in range(0, V):
+        for i in range(0, V):
+            for j in range(0, V):
+                if dist[i][j] > dist[i][k] + dist[k][j]:
+                    dist[i][j] = dist[i][k] + dist[k][j]
+                    pred[i][j] = pred[i][k]
+
+                    dist[j][i] = dist[k][i] + dist[j][k]
+                    pred[j][i] = pred[k][i]
+
+    return dist, pred
+
+def path(u, v, pred):
+    if pred[u][v] == None:
+        return []
+
+    path = [u]
+    while u != v:
+        u = pred[u][v]
+        path.append(u)
+
+    return path
+
 def weight(G):
     total_weight = 0.0
     for node in [node for node in G.nodes()]:
@@ -57,7 +96,7 @@ def value(G, current_node, target_node, unconquered_kingdoms, conquered_kingdoms
     if len(unconquered_adjacent) == 1 and unconquered_adjacent[0] == target_node:
         coming_from_leaf = True
 
-    if coming_from_leaf and start_node != current_node:
+    if coming_from_leaf:
         # You get a bonus for stopping the inevitable return to capture the leaf
         # In addition, avoid adding the leaf bonus if the leaf node is the start node, since you will have to 
         # return to the start node anyway
@@ -110,7 +149,24 @@ def solve(list_of_kingdom_names, starting_kingdom, adjacency_matrix, params=[]):
     
     G.add_weighted_edges_from(edges)
 
-    shortest_paths = nx.floyd_warshall(G)
+    #shortest_paths = nx.floyd_warshall(G)
+    shortest_paths, pred = floyd_warshall(G)
+
+    # pdb.set_trace()
+
+    # for a in range(len(shortest_paths)):
+    #     for b in range(len(shortest_paths)):
+    #         sys.stdout.write(str(shortest_paths[a][b]) + " ")
+
+    #     print()
+
+    # print()
+
+    # for a in range(len(sp)):
+    #     for b in range(len(sp)):
+    #         sys.stdout.write(str(sp[a][b]) + " ")
+
+    #     print()
 
     vertex_sets = [None] * len(G.nodes())
     costs = []
@@ -118,14 +174,16 @@ def solve(list_of_kingdom_names, starting_kingdom, adjacency_matrix, params=[]):
 
     #pdb.set_trace()
 
-    for i, vertex in enumerate(G.nodes()):
+    for i, vertex in enumerate(sorted([a for a in G.nodes()])):
         vertex_sets[i] = []
         costs.append(acquire_cost(G, start_vertex, vertex, shortest_paths))
         for adjacent_vertex in G[vertex]:
             vertex_sets[i].append(adjacent_vertex)
 
     print("Initial costs: ", costs)
-    print()
+    print(vertex_sets)
+
+    #pdb.set_trace()
 
     selected, cost = weightedsetcover(G, vertex_sets, costs, start_vertex, shortest_paths)
 
@@ -181,7 +239,7 @@ def weightedsetcover(G, S, costs, start_node, shortest_paths):
             pq.addtask(index, priority)
             print("Added node", index, "with priority", priority, "(cost:", float(costs[index]), ", value:", value(G, start_node, index, unconquered_kingdoms, conquered_kingdoms, start_node), ")")
 
-    print()
+    print(adj)
 
     while len(conquered_kingdoms) < K:
         target_node = pq.poptask() # get the most cost-effective set
@@ -199,7 +257,7 @@ def weightedsetcover(G, S, costs, start_node, shortest_paths):
             conquered_kingdoms.add(adjacent_vertex)
             if adjacent_vertex in unconquered_kingdoms:
                 unconquered_kingdoms.remove(adjacent_vertex)
-            #pq.addtask(adjacent_vertex, MAXPRIORITY)
+            pq.addtask(adjacent_vertex, MAXPRIORITY)
             print("Adding task", adjacent_vertex, "with priority", MAXPRIORITY)
             for n in udict[adjacent_vertex]:
                 if n != target_node:
